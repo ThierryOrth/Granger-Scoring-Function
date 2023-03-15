@@ -1,18 +1,6 @@
 import numpy as np
 from functional_dependencies import *
-from dscm import DSCM
-from graph_representations import dag_to_cpdag, cpdag_to_markov_equivalence_class
-from scoring_function import score_equivalence_class, structural_hamming_distance
 
-### IN PROGRESS ###
-
-def run_experiment():
-    return
-
-def get_scm_coefficients(var_params : np.array, coeff_params : np.array, density_params : np.array) -> dict:
-    raise NotImplementedError()
-
-    return 
 
 # TODO: assign p-value matrices only for those cells in the PCDAG where m[i,j]==1
 
@@ -25,6 +13,9 @@ def get_scm_coefficients(var_params : np.array, coeff_params : np.array, density
 # TODO: save data in folders to save time
 
 if __name__ == "__main__":
+
+    # randomise tau
+    
     N = 100
     time_params = np.arange(10, N+1, 10)
     coeff_params = np.concatenate((np.arange(-0.1, -1.0, -0.1),\

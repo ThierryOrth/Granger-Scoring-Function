@@ -43,4 +43,10 @@ def cpdag_to_markov_equivalence_class(cpdag_repr: np.array, k : int = 0) -> tupl
                             for dag in markov_equivalence_class])
 
     return markov_equivalence_class, adj_matrices
+<<<<<<< HEAD
     
+=======
+    
+
+
+>>>>>>> ab43b717a8e6464e7f708c8625c3976bffd325f0

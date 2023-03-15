@@ -4,8 +4,15 @@ import matplotlib.pyplot as plt
 class DSCM:
     """ Defines a Dynamic Structural Causal Model.
             :param links: parameter dictionary that defines causal influence
+<<<<<<< HEAD
         Note: this format for DSCMs is similar to Jakob Runge's format, but slightly differs due to the simplifying 
               assumption that mappings are defined over the linear sum of causes instead over causes separately. 
+=======
+
+        Note: this format for DSCMs is similar to Jakob Runge's format, but slightly differs due to the simplifying 
+              assumption that mappings are defined over the linear sum of causes instead over causes separately. 
+
+>>>>>>> ab43b717a8e6464e7f708c8625c3976bffd325f0
     """
     def __init__(self, links : dict, map : function):
         self.links = links
@@ -22,8 +29,16 @@ class DSCM:
         """ Dictionarise causes, lags, coefficients and functions for easy retrieval.
         
                 :returns effect_to_cause: map from effects to causes
+<<<<<<< HEAD
                 :returns effect_to_lag: map from effects to time lags of causes
                 :returns effect_to_coeffs: map from effects to coefficients of causes
+=======
+
+                :returns effect_to_lag: map from effects to time lags of causes
+
+                :returns effect_to_coeffs: map from effects to coefficients of causes
+
+>>>>>>> ab43b717a8e6464e7f708c8625c3976bffd325f0
         """
         effect_to_cause, effect_to_lag, effect_to_coeffs = dict(), dict(), dict()
 
@@ -95,9 +110,19 @@ class DSCM:
     def get_adjacency_matrices(self, k : int = 0) -> tuple:
         """ Retrieve adjacency matrices for lagged and contemporaneous causal relations. In both matrices,
             the i'th row corresponds to cause i whilst the j'th column corresponds to effect j. 
+<<<<<<< HEAD
                 :param k: determines where to zero the lagged adjacency matrix
                 :returns lag_matrix: adjacency matrix of size d*gamma x d*gamma for lagged causal relations   
                 :returns instant_matrix: adjacency matrix of size d x d for contemporaneous causal relations 
+=======
+
+                :param k: determines where to zero the lagged adjacency matrix
+
+                :returns lag_matrix: adjacency matrix of size d*gamma x d*gamma for lagged causal relations   
+
+                :returns instant_matrix: adjacency matrix of size d x d for contemporaneous causal relations 
+
+>>>>>>> ab43b717a8e6464e7f708c8625c3976bffd325f0
         """
         
         gamma = abs(self.max_lag)+1

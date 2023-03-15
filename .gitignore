@@ -1,3 +1,8 @@
-*.txt
-*.pdf
-*.xlsx
+*
+
+!.gitignore
+!*.py
+!*.md
+
+/functional_dependencies.py
+/visualisation.py

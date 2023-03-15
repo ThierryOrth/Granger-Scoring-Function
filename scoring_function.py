@@ -22,6 +22,7 @@ def get_indices(edge_idxs: np.array, num_of_vars: int) -> tuple:
 def get_condition_sets(obs_data: np.array, obs_idxs: np.array, cause_idx: int, effect_idx: int, lag: int, tau_max: int, \
                                                                                             lag_specific: bool = False) -> np.array:
     """ Return condition sets for conditional independence tests.
+<<<<<<< HEAD
         :param obs_data: array of observations for time series elements
         :param cause_idx: index of cause at each time
         :param effect_idx: index of effect at each time
@@ -31,6 +32,27 @@ def get_condition_sets(obs_data: np.array, obs_idxs: np.array, cause_idx: int, e
         :returns cause: array of observations for cause
         :returns effect: array of observations for effect
         :returns condition: array of observations for conditional set 
+=======
+
+        :param obs_data: array of observations for time series elements
+
+        :param cause_idx: index of cause at each time
+
+        :param effect_idx: index of effect at each time
+
+        :param lag: lag between cause and effect
+
+        :tau_max: absolute value of largest lag
+
+        :lag_specific: check whether to partition data for lag-specific causes
+
+        :returns cause: array of observations for cause
+
+        :returns effect: array of observations for effect
+
+        :returns condition: array of observations for conditional set 
+
+>>>>>>> ab43b717a8e6464e7f708c8625c3976bffd325f0
     """
 
     past_idxs = np.array(list(zip(obs_idxs - tau_max, obs_idxs - 1))).astype(int)
@@ -111,9 +133,19 @@ def score_equivalence_class(obs_data: np.array, cpdag_repr: np.array, max_lag: i
     """ Scores input equivalence class represented as PCDAG.
             :param obs_data: observational data where each column is a time series realisation
             :param cpdag_repr: PCDAG, represented in array format
+<<<<<<< HEAD
             :param true_graph: ground truth DAG, represented in array format
             :param oracle: conditional independence tester
             :param num_of_digits: 
+=======
+
+            :param true_graph: ground truth DAG, represented in array format
+
+            :param oracle: conditional independence tester
+
+            :param num_of_digits: 
+
+>>>>>>> ab43b717a8e6464e7f708c8625c3976bffd325f0
             :returns scores: array of scores on each DAG
     """
 

@@ -36,7 +36,13 @@ class PartialCorrelation(Oracle):
         """ Get residuals from predicting Y = f(X) using the Least Squares Solution. 
         
                 :param feature_obs: array consisting of features for prediction
+<<<<<<< HEAD
                 :param target_obs: array consisting of target values
+=======
+
+                :param target_obs: array consisting of target values
+
+>>>>>>> ab43b717a8e6464e7f708c8625c3976bffd325f0
                 :return residuals: distances between observations and regression line
         """
     
