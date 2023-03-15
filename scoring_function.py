@@ -133,20 +133,14 @@ def score_equivalence_class(obs_data: np.array, cpdag_repr: np.array, max_lag: i
     """ Scores input equivalence class represented as PCDAG.
             :param obs_data: observational data where each column is a time series realisation
             :param cpdag_repr: PCDAG, represented in array format
-<<<<<<< HEAD
-            :param true_graph: ground truth DAG, represented in array format
-            :param oracle: conditional independence tester
-            :param num_of_digits: 
-=======
 
             :param true_graph: ground truth DAG, represented in array format
 
             :param oracle: conditional independence tester
-
-            :param num_of_digits: 
-
->>>>>>> ab43b717a8e6464e7f708c8625c3976bffd325f0
+            
             :returns scores: array of scores on each DAG
+
+            #TODO
     """
 
     T, d = obs_data.shape
