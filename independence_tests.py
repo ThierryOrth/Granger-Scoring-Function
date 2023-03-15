@@ -1,11 +1,9 @@
 # https://arxiv.org/abs/1702.07007
-
 import copy
 import scipy
 import dcor
 import numpy as np
 from sklearn import gaussian_process 
-import matplotlib.pyplot as plt
 
 class Oracle:
     def __init__(self):
@@ -13,7 +11,7 @@ class Oracle:
 
     def set_correct_dimensions(self, arr : np.array) -> np.array:
         """ 
-                :param arr:
+                :param arr: array consisting observations for condition
         """
 
         arr_copy = copy.deepcopy(arr)
@@ -37,11 +35,9 @@ class PartialCorrelation(Oracle):
     def get_residuals(self, feature_obs : np.array, target_obs : np.array) -> np.array:
         """ Get residuals from predicting Y = f(X) using the Least Squares Solution. 
         
-                :param feature_obs:
-
-                :param target_obs:
-
-                :return residuals:
+                :param feature_obs: array consisting of features for prediction
+                :param target_obs: array consisting of target values
+                :return residuals: distances between observations and regression line
         """
     
         w_hat, *_ = np.linalg.lstsq(feature_obs, target_obs, \
