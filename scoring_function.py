@@ -126,7 +126,7 @@ def get_score_matrix(obs_data: np.array, cpdag_repr: np.array, max_lag: int, ora
 
     return score_matrix
 
-def score_equivalence_class(obs_data: np.array, cpdag_repr: np.array, max_lag: int, ground_truth: np.array, oracle: Oracle, \
+def score_equivalence_class(obs_data: np.array, cpdag_repr: np.array, max_lag: int, true_graph: np.array, oracle: Oracle, \
                                        score_precision: int = 3, instant_effects: bool = True, lag_specific:bool=False) -> np.array:
     """ Scores input equivalence class represented as PCDAG.
 
@@ -134,7 +134,7 @@ def score_equivalence_class(obs_data: np.array, cpdag_repr: np.array, max_lag: i
 
             :param cpdag_repr: PCDAG, represented in array format
 
-            :param ground_truth: ground truth DAG, represented in array format
+            :param true_graph: ground truth DAG, represented in array format
 
             :param oracle: conditional independence tester
 
@@ -165,6 +165,12 @@ def get_best_candidate(equivalence_class: np.array, scores: np.array):
     opt_score_idx = np.argmax(scores)
 
     return equivalence_class[opt_score_idx]
+
+
+def structural_hamming_distance(true_graph : np.array, candidate_graph : np.array) -> int:
+    raise NotImplementedError()
+
+    return None
 
 
 if __name__ == "__main__":
@@ -203,8 +209,8 @@ if __name__ == "__main__":
     max_lag = (n/d)-1
 
     equivalence_class, scores = score_equivalence_class(obs_data = obs_data, cpdag_repr = cpdag_repr, \
-                                                max_lag = max_lag, ground_truth=instant_matrix, oracle = pc, score_precision = 3, \
-                                                        instant_effects = False, lag_specific=False)
+                                                max_lag = max_lag, true_graph=instant_matrix, \
+                                                oracle = pc, score_precision = 3, instant_effects = False, lag_specific=False)
 
     idx = np.argmax(scores)
     best_candidate = equivalence_class[idx]

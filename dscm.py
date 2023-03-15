@@ -11,10 +11,10 @@ class DSCM:
               assumption that mappings are defined over the linear sum of causes instead over causes separately. 
 
     """
-    def __init__(self, links : dict, mapping):
+    def __init__(self, links : dict, map : function):
         self.links = links
         self.num_of_vars = len(self.links)
-        self.mapping = mapping
+        self.map = map
         self.causes, self.lags, self.coeffs = self.dictionarise()
         self.max_lag = min(lag for lags in self.lags.values() for lag in lags)
 
@@ -57,7 +57,7 @@ class DSCM:
         funcs = []
 
         for j in range(self.num_of_vars):
-            func = self.mapping
+            f = self.map
 
             for link in self.links[j]:
                 (var, lag), coeff = link
@@ -65,7 +65,7 @@ class DSCM:
                 if 0 < abs(lag):
                     graph[j, var, abs(lag) - 1] = coeff
 
-                funcs.append(func)
+                funcs.append(f)
     
         for i in range(0, self.num_of_vars*max_lag, self.num_of_vars):
             stability_matrix[:self.num_of_vars,i:i+self.num_of_vars] = graph[:, :, idx]
@@ -101,7 +101,7 @@ class DSCM:
         for t in range(start, start+T):
             for j in range(self.num_of_vars):
                 noise = np.random.normal(0.0, 1.0) if gaussian_noise else 0.0
-                obs_data[t, j] = self.mapping(np.dot(self.coeffs[j], 
+                obs_data[t, j] = f(np.dot(self.coeffs[j], 
                                             obs_data[t + np.array(self.lags[j]), self.causes[j]])
                                                         ) + noise
         return obs_data[start:, :]
@@ -183,14 +183,14 @@ if __name__ == "__main__":
     g = lambda x : (1-4*np.e**(-x**2/2))*x
     h = lambda x : (1-4*x**3 * np.e**(-x**2/2))*x
 
-    links_coeffs = {
-                        0 : [((0, -1), 0.7), ((1, 0), -0.8)],
-                        1 : [((1, -1), 0.8), ((3, 0), 0.8)],
-                        2 : [((2, -1), 0.5), ((1, -2), 0.5), ((3, 0), 0.6)],
-                        3 : [((3, -1), 0.4)],
-                    }
+    links = {
+                0 : [((0, -1), 0.7), ((1, 0), -0.8)],
+                1 : [((1, -1), 0.8), ((3, 0), 0.8)],
+                2 : [((2, -1), 0.5), ((1, -2), 0.5), ((3, 0), 0.6)],
+                3 : [((3, -1), 0.4)],
+            }
 
-    dscm = DSCM(links=links_coeffs, mapping = g)
+    dscm = DSCM(links=links, mapping = g)
     obs_data = dscm.generate_obs_data(T=1000)
     dscm.plot_data(obs_data, dim=(2,2))
     lag_matrix, cont_matrix = dscm.get_adjacency_matrices()
