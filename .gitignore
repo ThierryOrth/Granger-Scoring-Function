@@ -4,5 +4,5 @@
 !*.py
 !*.md
 
-functional_dependencies.py
-visualisation.py
+/functional_dependencies.py
+/visualisation.py
