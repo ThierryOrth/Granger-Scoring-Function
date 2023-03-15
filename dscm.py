@@ -1,25 +1,19 @@
 
 import numpy as np
-from causaldag import DAG
 import matplotlib.pyplot as plt
-import graphviz as gv
-from collections import defaultdict
 
 class DSCM:
     """ Defines a Dynamic Structural Causal Model.
 
             :param links: parameter dictionary that defines causal influence
-        
-        Example input: 
-            {0 : [((0, -1), 0.7), ((4, -2), 0.1)], ..., 6: [((6, -1), 0.4)]}
 
-        Note: this format is similar to Jakob Runge's format, but we assume for simplicity that the mapping is defined
-              over the linear sum of causes instead of over each variable separately.
+        Note: this format for DSCMs is similar to Jakob Runge's format, but slightly differs due to the simplifying 
+              assumption that mappings are defined over the linear sum of causes instead over causes separately. 
 
     """
     def __init__(self, links : dict, mapping):
         self.links = links
-        self.d = len(self.links)
+        self.num_of_vars = len(self.links)
         self.mapping = mapping
         self.causes, self.lags, self.coeffs = self.dictionarise()
         self.max_lag = min(lag for lags in self.lags.values() for lag in lags)
@@ -31,23 +25,19 @@ class DSCM:
     def dictionarise(self) -> tuple:
         """ Dictionarise causes, lags, coefficients and functions for easy retrieval.
         
-                :returns effect_to_cause: mapping from effects to causes
+                :returns effect_to_cause: map from effects to causes
 
-                :returns effect_to_lag: mapping from effects to time lags of causes
+                :returns effect_to_lag: map from effects to time lags of causes
 
-                :returns effect_to_coeffs: mapping from effects to coefficients of causes
+                :returns effect_to_coeffs: map from effects to coefficients of causes
 
         """
+        effect_to_cause, effect_to_lag, effect_to_coeffs = dict(), dict(), dict()
 
-        effect_to_cause = defaultdict(lambda : [])
-        effect_to_lag = defaultdict(lambda : [])
-        effect_to_coeffs = defaultdict(lambda : [])
-
-        for effect, causes in self.links.items():
-            for (cause,lag), coeff in causes:
-                effect_to_cause[effect].append(cause)
-                effect_to_lag[effect].append(lag)
-                effect_to_coeffs[effect].append(coeff)
+        for effect, causes in self.links.items():        
+            effect_to_cause.update({effect : [cause for (cause, _), _ in causes]})
+            effect_to_lag.update({effect : [lag for (_, lag),_ in causes]})
+            effect_to_coeffs.update({effect : [coeff for (_,_), coeff in causes]})
 
         return effect_to_cause, effect_to_lag, effect_to_coeffs
     
@@ -60,13 +50,13 @@ class DSCM:
             :returns stationary: indicates if VAR process is stationary 
 
         """
-        index = 0
+        idx = 0
         max_lag = abs(self.max_lag)
-        graph = np.zeros((self.d, self.d, max_lag))
-        stability_matrix = np.zeros((self.d * max_lag, self.d * max_lag))
+        graph = np.zeros((self.num_of_vars, self.num_of_vars, max_lag))
+        stability_matrix = np.zeros((self.num_of_vars * max_lag, self.num_of_vars * max_lag))
         funcs = []
 
-        for j in range(self.d):
+        for j in range(self.num_of_vars):
             func = self.mapping
 
             for link in self.links[j]:
@@ -77,11 +67,11 @@ class DSCM:
 
                 funcs.append(func)
     
-        for i in range(0, self.d*max_lag, self.d):
-            stability_matrix[:self.d,i:i+self.d] = graph[:, :, index]
-            if index < max_lag - 1:
-                stability_matrix[i+self.d:i+2*self.d,i:i+self.d] = np.identity(self.d)
-            index += 1
+        for i in range(0, self.num_of_vars*max_lag, self.num_of_vars):
+            stability_matrix[:self.num_of_vars,i:i+self.num_of_vars] = graph[:, :, idx]
+            if idx < max_lag - 1:
+                stability_matrix[i+self.num_of_vars:i+2*self.num_of_vars, i:i+self.num_of_vars] = np.identity(self.num_of_vars)
+            idx += 1
 
         eigenvector, _ = np.linalg.eig(stability_matrix)
 
@@ -103,13 +93,13 @@ class DSCM:
         np.random.seed(random_state)
 
         start = abs(self.max_lag)
-        obs_data = np.zeros((start + T, self.d))
+        obs_data = np.zeros((start + T, self.num_of_vars))
 
         if set_off_gaussian:
-            obs_data[:start, :] = np.random.normal(0, 1, size=(start, self.d))
+            obs_data[:start, :] = np.random.normal(0, 1, size=(start, self.num_of_vars))
         
         for t in range(start, start+T):
-            for j in range(self.d):
+            for j in range(self.num_of_vars):
                 noise = np.random.normal(0.0, 1.0) if gaussian_noise else 0.0
                 obs_data[t, j] = self.mapping(np.dot(self.coeffs[j], 
                                             obs_data[t + np.array(self.lags[j]), self.causes[j]])
@@ -117,32 +107,32 @@ class DSCM:
         return obs_data[start:, :]
     
     def get_adjacency_matrices(self, k : int = 0) -> tuple:
-        """ Retrieve adjacency matrix of size d*γ; each i'th row corresponds to cause i; 
-            each j'th column to effect j. 
+        """ Retrieve adjacency matrices for lagged and contemporaneous causal relations. In both matrices,
+            the i'th row corresponds to cause i whilst the j'th column corresponds to effect j. 
 
                 :param k: determines where to zero the lagged adjacency matrix
 
-                :returns lag_matrix: adjacency matrix for lagged causal relations   
+                :returns lag_matrix: adjacency matrix of size d*gamma x d*gamma for lagged causal relations   
 
-                :returns instant_matrix: adjacency matrix for contemporaneous causal relations 
+                :returns instant_matrix: adjacency matrix of size d x d for contemporaneous causal relations 
 
         """
         
         gamma = abs(self.max_lag)+1
-        dim = self.d * gamma
+        dim = self.num_of_vars * gamma
         lag_matrix = np.zeros((dim,dim))
-        instant_matrix = np.zeros((self.d, self.d)) 
+        instant_matrix = np.zeros((self.num_of_vars, self.num_of_vars)) 
 
-        for j in range(0, self.d):
+        for j in range(0, self.num_of_vars):
             lags = np.array(self.lags[j])
             causes = np.array(self.causes[j])
             instant_cause_idxs = causes[lags == 0]
-            rel_cause_idxs = np.add(np.multiply(self.d, lags[lags<0]), 
+            rel_cause_idxs = np.add(np.multiply(self.num_of_vars, lags[lags<0]), 
                                         np.subtract(causes[lags<0], j))
         
             for t in range(1, gamma):
                 ### compute cause and effect indices ###
-                lagged_effect_idx = self.d*t+j
+                lagged_effect_idx = self.num_of_vars*t+j
                 lagged_cause_idxs = np.add(rel_cause_idxs, lagged_effect_idx)
 
                 ### fill adjacency matrices ### 
@@ -200,10 +190,9 @@ if __name__ == "__main__":
                         3 : [((3, -1), 0.4)],
                     }
 
-    dscm = DSCM(links=links_coeffs, mapping = np.sin)
-    obs_data = dscm.generate_obs_data(T=20)
-    val = dscm.check_stationarity()
-
+    dscm = DSCM(links=links_coeffs, mapping = g)
+    obs_data = dscm.generate_obs_data(T=1000)
+    dscm.plot_data(obs_data, dim=(2,2))
     lag_matrix, cont_matrix = dscm.get_adjacency_matrices()
 
    

@@ -1,11 +1,9 @@
 # https://arxiv.org/abs/1702.07007
-
 import copy
 import scipy
 import dcor
 import numpy as np
 from sklearn import gaussian_process 
-import matplotlib.pyplot as plt
 
 class Oracle:
     def __init__(self):

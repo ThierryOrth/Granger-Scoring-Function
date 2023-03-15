@@ -24,56 +24,52 @@ def get_indices(edge_idxs: np.array, num_of_vars: int) -> tuple:
     return cause_idx, effect_idx, lag
 
 
-def get_condition_sets(data: np.array, obs_idxs: np.array, cause_idx: int, effect_idx: int, lag: int, tau_max: int, lag_specific: bool = False) -> np.array:
+def get_condition_sets(obs_data: np.array, obs_idxs: np.array, cause_idx: int, effect_idx: int, lag: int, tau_max: int, \
+                                                                                            lag_specific: bool = False) -> np.array:
     """ Return condition sets for conditional independence tests.
 
-        :param past:
+        :param obs_data: array of observations for time series elements
 
-        :param present:
+        :param cause_idx: index of cause at each time
 
-        :param cause_idx:
+        :param effect_idx: index of effect at each time
 
-        :param effect_idx:
+        :param lag: lag between cause and effect
 
-        :param lag:
+        :tau_max: absolute value of largest lag
 
-        :returns cause:
+        :lag_specific: check whether to partition data for lag-specific causes
 
-        :returns effect:
+        :returns cause: array of observations for cause
 
-        :returns condition:
+        :returns effect: array of observations for effect
+
+        :returns condition: array of observations for conditional set 
 
     """
-    # TODO: try to get rid of past, present arrays or use them everywhere
 
     past_idxs = np.array(list(zip(obs_idxs - tau_max, obs_idxs - 1))).astype(int)
     past = obs_data[past_idxs]
     present = obs_data[obs_idxs]
 
-
+    ### partition for classic Granger causality ###
     if not lag_specific:
         cause = past[:, 0, cause_idx]
         effect = present[:, effect_idx]
 
-        condition = np.delete(data[:-tau_max], cause_idx, axis=1)
+        condition = np.delete(obs_data[:-tau_max], cause_idx, axis=1)
 
         return cause, effect, condition
 
-        print(f"cause: \
-              {cause}")
-
-        print(f"effect:\
-              {effect}")
-
-        print(f"condition: \
-              {condition}")
-
-    if lag == 0:
-        cause = data[:, cause_idx]
-        effect = data[:, effect_idx]
-        condition = np.delete(data, cause_idx, axis=1)
+    ### partition for instantaneous effects ### 
+    elif lag == 0:
+        cause = obs_data[:, cause_idx]
+        effect = obs_data[:, effect_idx]
+        condition = np.delete(obs_data, cause_idx, axis=1)
 
         return cause, effect, condition
+    
+    ### partition for non-instantaneous, lag-specific effects ###
 
     cause = past[:, -lag, cause_idx] if 0 < lag \
                         else present[:, cause_idx]
@@ -81,14 +77,13 @@ def get_condition_sets(data: np.array, obs_idxs: np.array, cause_idx: int, effec
 
     condition = np.copy(past[:, :, :])
     condition[:, -lag, cause_idx] = np.nan
-    condition = np.array([
-        np.ndarray.flatten(row[~ np.isnan(row)])
-        for row in condition])
+    condition = np.array([np.ndarray.flatten(row[~ np.isnan(row)]) for row in condition])
 
     return cause, effect, condition
 
 
-def get_score_matrix(obs_data: np.array, cpdag_repr: np.array, max_lag: int, oracle: Oracle = lambda x, y, z: np.nan, num_of_digits: int = 3, instant_effects: bool = True) -> np.array:
+def get_score_matrix(obs_data: np.array, cpdag_repr: np.array, max_lag: int, oracle: Oracle = lambda x, y, z: np.nan, \
+                            score_precision: int = 3, instant_effects: bool = True, lag_specific:bool=False) -> np.array:
     """ Constructs scoring matrix from observational data given an independence oracle.
 
         :param obs_data: observational data where each column is a time series realisation
@@ -100,57 +95,39 @@ def get_score_matrix(obs_data: np.array, cpdag_repr: np.array, max_lag: int, ora
         :returns score_matrix: matrix consisting of scores for each non-zero entry in the CPDAG
 
     """
+
     T, d = obs_data.shape
     tau_max = abs(max_lag)
     gamma = tau_max + 1
-
-    idx_to_values = dict()
-    values_to_score = dict()
-
+    idx_to_values, values_to_score = dict(), dict()
     score_matrix = np.zeros((d, d))
     edge_idxs = list(zip(*np.where(cpdag_repr == 1)))
-    # past, present = get_historised_data(obs_data=obs_data,
-    #                                     tau_max=tau_max, T=T)
-
-    # points where we can predict ###
     obs_idxs = np.arange(0, T - tau_max, 1) + tau_max
 
     for map_idx, edge_idx in enumerate(edge_idxs):
-        (cause_idx, effect_idx), lag = edge_idx, 0 if instant_effects else get_indices(
-            edge_idxs=edge_idx, num_of_vars=d)
+        (cause_idx, effect_idx), lag = edge_idx, 0 if instant_effects \
+                    else get_indices(edge_idxs=edge_idx, num_of_vars=d)
 
         idx_to_values[map_idx] = (cause_idx, effect_idx, lag)
 
+        ### assign score if already known ###
         if (score := values_to_score.get((cause_idx, effect_idx, lag))):
             score_matrix[edge_idx] = score
             continue
 
-        cause, effect, condition = get_condition_sets(data=obs_data, obs_idxs=obs_idxs,
-                                                      cause_idx=cause_idx, effect_idx=effect_idx, lag=lag, tau_max=tau_max, lag_specific=False)
+        cause, effect, condition = get_condition_sets(obs_data=obs_data, obs_idxs=obs_idxs, \
+                                                      cause_idx=cause_idx, effect_idx=effect_idx, \
+                                                        lag=lag, tau_max=tau_max, lag_specific=lag_specific)
 
-        score_matrix[edge_idx] = round(1 - oracle.get_significance(X=cause, Y=effect,
-                                                                   Z=condition, T=T, d=d), num_of_digits)
+        score_matrix[edge_idx] = round(1 - oracle.get_significance(X=cause, Y=effect, \
+                                            Z=condition, T=T, d=d), score_precision)
 
         values_to_score[(cause_idx, effect_idx, lag)] = score_matrix[edge_idx]
 
     return score_matrix
 
-    # for every score to compute,
-
-    # set obs_idxs for cause and effect arrays
-    # get cause and effect arrays,
-    # set condition to be all past values, reduced by the cause array
-
-    # predict for every value and then get the residuals for the relevant values only
-    #
-    # mask the relevant value X^{t-\tau}
-
-    # compute score just in case it has not been computed before (because it will be the same anyhow)
-
-    # score_matrix[idx] = oracle(cause, effect, conditio
-
-
-def score_equivalence_class(obs_data: np.array, cpdag_repr: np.array, max_lag: int, ground_truth: np.array, oracle: Oracle, num_of_digits: int = 3) -> np.array:
+def score_equivalence_class(obs_data: np.array, cpdag_repr: np.array, max_lag: int, ground_truth: np.array, oracle: Oracle, \
+                                       score_precision: int = 3, instant_effects: bool = True, lag_specific:bool=False) -> np.array:
     """ Scores input equivalence class represented as PCDAG.
 
             :param obs_data: observational data where each column is a time series realisation
@@ -161,9 +138,9 @@ def score_equivalence_class(obs_data: np.array, cpdag_repr: np.array, max_lag: i
 
             :param oracle: conditional independence tester
 
-            :param num_of_digits:
+            :param num_of_digits: 
 
-            :returns scores:
+            :returns scores: array of scores on each DAG
     """
 
     T, d = obs_data.shape
@@ -173,9 +150,10 @@ def score_equivalence_class(obs_data: np.array, cpdag_repr: np.array, max_lag: i
         cpdag_repr=cpdag_repr)
     scores = np.zeros(len(equivalence_class))
 
-    score_matrix = get_score_matrix(obs_data=obs_data, cpdag_repr=cpdag_repr,
-                                    max_lag=max_lag, oracle=oracle)
-
+    score_matrix = get_score_matrix(obs_data = obs_data, cpdag_repr = cpdag_repr, \
+                                    max_lag = max_lag, oracle = oracle, score_precision = score_precision, \
+                                        instant_effects = instant_effects, lag_specific=lag_specific)
+                                    
     for idx, member in enumerate(equivalence_class):
         score = np.sum(np.multiply(member, score_matrix))
         scores[idx] = score
@@ -202,15 +180,15 @@ if __name__ == "__main__":
         4: [((4, -1), 0.5), ((1, 0), 0.5), ((1, -1), 0.2)],
         5: [((4, -1), 0.5), ((1, -1), 0.2)],
         6: [((4, -1), 0.5), ((6, 0), 0.5), ((1, -1), 0.2)],
-        7: [((4, -1), 0.5), ((5, 0), 0.5), ((1, -1), 0.2)],
-        8: [((4, -1), 0.5), ((1, -1), 0.2)],
-        9: [((4, -1), 0.5), ((7, -1), 0.2)],
-        10: [((4, -1), 0.5), ((9, 0), 0.5), ((1, -1), 0.2)],
-        11: [((4, -1), 0.5), ((8, 0), 0.5), ((1, -1), 0.2)],
+        # 7: [((4, -1), 0.5), ((5, 0), 0.5), ((1, -1), 0.2)],
+        # 8: [((4, -1), 0.5), ((1, -1), 0.2)],
+        # 9: [((4, -1), 0.5), ((7, -1), 0.2)],
+        # 10: [((4, -1), 0.5), ((9, 0), 0.5), ((1, -1), 0.2)],
+        # 11: [((4, -1), 0.5), ((8, 0), 0.5), ((1, -1), 0.2)],
     }
 
     pc = PartialCorrelation()
-    dscm = DSCM(links=links_coeffs, mapping=h)
+    dscm = DSCM(links=links_coeffs, mapping=f)
 
     obs_data = dscm.generate_obs_data(T=20)
     lag_matrix, instant_matrix = dscm.get_adjacency_matrices()
@@ -224,9 +202,9 @@ if __name__ == "__main__":
     _, n = lag_matrix.shape
     max_lag = (n/d)-1
 
-    equivalence_class, scores = score_equivalence_class(obs_data=obs_data,
-                                                        cpdag_repr=cpdag_repr, max_lag=max_lag,
-                                                        ground_truth=instant_matrix, oracle=pc)
+    equivalence_class, scores = score_equivalence_class(obs_data = obs_data, cpdag_repr = cpdag_repr, \
+                                                max_lag = max_lag, ground_truth=instant_matrix, oracle = pc, score_precision = 3, \
+                                                        instant_effects = False, lag_specific=False)
 
     idx = np.argmax(scores)
     best_candidate = equivalence_class[idx]
