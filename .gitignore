@@ -3,3 +3,6 @@
 !.gitignore
 !*.py
 !*.md
+
+functional_dependencies.py
+visualisation.py
