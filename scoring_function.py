@@ -57,11 +57,9 @@ def get_score_matrix(obs_data: np.array, edges : list, tau_max: int, oracle: Ora
     for (i,j) in edges:
         p_matrix[i, j] = oracle.get_combined_pvalues(p_matrices[i, j, :], \
                                                         method = "harmonic")
-    # score_matrix = np.subtract(1, p_matrix)
+    score_matrix = np.subtract(1, p_matrix)
 
-    # return score_matrix
-
-    return p_matrix
+    return score_matrix
 
 def score_equivalence_class(obs_data: np.array, edges : list, equivalence_class : np.array, 
                                                         tau_max: int, oracle: Oracle, method : str) -> np.array:
@@ -93,7 +91,7 @@ def score_equivalence_class(obs_data: np.array, edges : list, equivalence_class 
     for idx, member in enumerate(equivalence_class):
         ### compute p-value that X_i \-> X_j for all i,j ###
         scored_member = np.multiply(member, score_matrix)
-        scores[idx] = 1 - oracle.get_combined_pvalues(pvalues = scored_member[np.nonzero(scored_member)].flatten(), 
+        scores[idx] = oracle.get_combined_pvalues(pvalues = scored_member[np.nonzero(scored_member)].flatten(), 
                                                                                             method = "harmonic")
     return scores
 
