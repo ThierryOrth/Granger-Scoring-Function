@@ -1,45 +1,56 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-#TODO: improve comments
-
 class DSCM:
     """ Defines a Dynamic Structural Causal Model.
 
             :param links: 
                 set of parameters describing causal influence
-            :param map: 
-                transformation applied to linear sum of causal influences
-
+            :param f: 
+                transformation applied to non-reflexive causal influences
     """
-    def __init__(self, links : dict, f : callable):
+
+    def __init__(self, links: dict, f: callable):
         self.links = links
-        self.num_of_vars = len(self.links)
         self.f = f
-        self.causes, self.lags, self.coeffs = self.dictionarise()
-        self.max_tau = abs(min(lag for lags in self.lags.values() for lag in lags))
-    
-    def dictionarise(self) -> tuple:
-        """ Dictionarise causes, lags, coefficients and functions for easy retrieval.
-        
-                :returns effect_to_cause: 
-                    mapping from effects to causes
-                :returns effect_to_lag: 
-                    mapping from effects to time lags of causes
-                :returns effect_to_coeffs: 
-                    mapping from effects to causal coefficients 
 
+        self.num_of_vars = len(self.links)
+        self.coeff_idx, self.lag_idx, self.cause_idx = 0, 1, 2
+
+        self.matr_repr = self.get_matr_repr()
+        self.max_tau = abs(self.get_max_tau())
+
+    def get_max_tau(self):
+        max_lag = 0
+
+        for effect in range(self.num_of_vars):
+            lag = min(map(lambda t: t[0][1], self.links[effect]))
+            max_lag = lag if lag < max_lag else max_lag
+
+        return max_lag
+
+    def get_matr_repr(self) -> dict:
+        """ Transforms dictionary to matrix representation for faster data generation.
+
+                :returns matr_repr:
         """
-        effect_to_cause, effect_to_lag, effect_to_coeffs = dict(), dict(), dict()
 
-        for effect, causes in self.links.items():        
-            effect_to_cause.update({effect : [cause for (cause, _), _ in causes]})
-            effect_to_lag.update({effect : [lag for (_, lag),_ in causes]})
-            effect_to_coeffs.update({effect : [coeff for (_, _), coeff in causes]})
+        matr_repr = dict()
 
-        return effect_to_cause, effect_to_lag, effect_to_coeffs
-    
-    def generate_obs_data(self, T : int, gauss_init : bool = True, gauss_noise : bool = True, random_state: int = 42, log_transform : bool = True) -> np.array:
+        for effect, causes in self.links.items():
+            idx = 1
+            matr_repr[effect] = np.zeros((len(causes), 3), dtype=object)
+
+            for (cause, lag), coeff in causes:
+                if cause == effect:
+                    matr_repr[effect][0, :] = [coeff, lag, cause]
+                else:
+                    matr_repr[effect][idx, :] = [coeff, lag, cause]
+                    idx += 1
+
+        return matr_repr
+
+    def generate_obs_data(self, t: int, gauss_init: bool = True, gauss_noise: bool = True, random_state: int = 42, data_transform: callable = np.cbrt) -> np.array:
         """ Generates observational data sample over the time interval {1, ..., T} 
             for each time series in the DSCM.
 
@@ -48,27 +59,29 @@ class DSCM:
             :param gauss_noise: 
                 Boolean for additive standard Gaussian noise
             :param random_state: 
-                insert for result reproducibility
+                seed for reproducibility
+            :param transform:
 
             :returns obs_data:
                 array of observations of shape T x d, with d the number of time series
         """
 
         np.random.seed(random_state)
-        obs_data = np.zeros((self.max_tau + T, self.num_of_vars))
+        obs_data = np.zeros((self.max_tau + t, self.num_of_vars))
 
         if gauss_init:
             obs_data[:self.max_tau, :] = np.random.normal(0, 1, size=(self.max_tau, self.num_of_vars))
-        
-        for t in range(self.max_tau, self.max_tau+T):
+
+        for i in range(self.max_tau, self.max_tau+t):
             for j in range(self.num_of_vars):
-                noise = np.random.normal(0.0, 1.0) if gauss_noise else 0.0
-                obs_data[t, j] = self.f(np.dot(self.coeffs[j], 
-                                            obs_data[t + np.array(self.lags[j]), self.causes[j]])
-                                                        ) + noise
+                matr_repr = self.matr_repr[j]
+
+                obs_data[i, j] = np.dot(matr_repr[0, self.coeff_idx], obs_data[i + matr_repr[0, self.lag_idx], matr_repr[0, self.cause_idx]]) + \
+                                 (self.f(np.dot(matr_repr[1:, self.coeff_idx].astype(float), obs_data[i + matr_repr[1:, self.lag_idx].astype(int), matr_repr[1:, self.cause_idx].astype(int)].astype(float))) or 0.0) + \
+                                                                                                                                                                        np.random.normal(0.0, 1.0) if gauss_noise else 0.0
                 
-        return np.cbrt(obs_data[self.max_tau:, :]) if log_transform else obs_data[self.max_tau:, :]
-    
+        return data_transform(obs_data[self.max_tau:, :]) 
+
     def get_adjacency_matrices(self) -> np.array:
         """ Constructs adjacency matrices for contemporaneous and lagged causal relations from the DSCM
             parameters. On the assumption of causal stationarity, these matrices span the maximal time window
@@ -79,54 +92,32 @@ class DSCM:
         """
 
         adj_matrices = np.zeros((self.max_tau + 1, self.num_of_vars, self.num_of_vars)).astype(int)
-        
+
         for effect in range(self.num_of_vars):
-            for idx, cause in enumerate(self.causes[effect]):
-                cause = self.causes[effect][idx]
-                tau = self.lags[effect][idx]
-                
-                adj_matrices[abs(tau), cause, effect] = 1
+            matr_repr = self.matr_repr[effect]
+
+            for _, row in enumerate(matr_repr):
+                cause = row[self.cause_idx]
+                tau = abs(row[self.lag_idx])
+
+                adj_matrices[tau, cause, effect] = 1
 
         return adj_matrices
 
-    def get_summary_graph(self, adj_matrices : np.array = None, dag_repr : bool = True) -> np.array:
-        """ Constructs summary graph from adjacency matrices, defined as summary_graph[i,j] = 1 iff
-            adj_matrices[i,j,tau] = 1 for some tau. 
-
-                :param adj_matrices: 
-                    adjacency matrices representing contemporaneous and lagged causes of DSCM
-                :param dag_repr:
-                    Boolean to convert summary graph into DAG representation
-                
-                :returns summary_graph:
-                    summary graph induced by adjacency matrices
-        """
-
-        *_ , d = adj_matrices.shape
-        summary_graph = np.zeros((d,d)).astype(int)
-
-        for i in range(d):
-            for j in range(d):
-                summary_graph[i,j] = 1 if 0 < np.sum(adj_matrices[:, i, j]) else 0
-
-        if dag_repr:
-            np.fill_diagonal(summary_graph, 0)
-
-        return summary_graph
-    
     def check_stationarity(self) -> bool:
         """ Code and comments in this function are a slight adaption from code by Jakob Runge, source: 
                 https://github.com/jakobrunge/tigramite/blob/c877f0b578c357b1c26f666764be07676193d4dc/tigramite/toymodels/structural_causal_processes.py#L865
-        
+
         Returns stationarity according to a unit root test. Assumes an at least 
         asymptotically linear vector autoregressive process without contemporaneous links.
-            
+
             :returns stationary: 
                 indicates if VAR process (DSCM) is stationary 
         """
-        
+
         graph = np.zeros((self.num_of_vars, self.num_of_vars, self.max_tau))
-        stability_matrix = np.zeros((self.num_of_vars * self.max_tau, self.num_of_vars * self.max_tau))
+        stability_matrix = np.zeros(
+            (self.num_of_vars * self.max_tau, self.num_of_vars * self.max_tau))
         funcs = []
 
         for j in range(self.num_of_vars):
@@ -142,18 +133,20 @@ class DSCM:
         idx = 0
 
         for i in range(0, self.num_of_vars*self.max_tau, self.num_of_vars):
-            stability_matrix[:self.num_of_vars,i:i+self.num_of_vars] = graph[:, :, idx]
+            stability_matrix[:self.num_of_vars, i:i +
+                             self.num_of_vars] = graph[:, :, idx]
             if idx < self.max_tau - 1:
-                stability_matrix[i+self.num_of_vars:i+2*self.num_of_vars, i:i+self.num_of_vars] = np.identity(self.num_of_vars)
+                stability_matrix[i+self.num_of_vars:i+2*self.num_of_vars,
+                                 i:i+self.num_of_vars] = np.identity(self.num_of_vars)
             idx += 1
 
         eigenvector, _ = np.linalg.eig(stability_matrix)
 
         return True if np.all(np.abs(eigenvector) < 1) else False
-    
-    def plot_data(self, obs_data : np.array, dim : tuple, dir : str = "") -> None:
+
+    def plot_data(self, obs_data: np.array, dim: tuple, dir: str = "") -> None:
         """ Plots observational data. 
-        
+
                 :param obs_data: 
                     array consisting of observations per timestep
                 :param dim: 
@@ -163,42 +156,24 @@ class DSCM:
         """
 
         T, d = obs_data.shape
-        n,m = dim
-        idxs = np.arange(1, T+1, 1)
+        n, m = dim
+        idxs = np.arange(1, T + 1, 1)
         fig, axes = plt.subplots(n, m)
-        fig.tight_layout() 
+        fig.tight_layout()
+
         k = 0
 
         for i in range(n):
             for j in range(m):
-                if k<d:
-                    axes[i,j].set_title(f"$X_{k+1}$ for $t=1,...,{T}$")
-                    axes[i,j].set_xlabel(f"$T$")
-                    axes[i,j].set_ylabel(f"$X_{k+1}$")
-                    axes[i,j].plot(idxs, obs_data[:, k], alpha = 0.85, \
-                                                    color = "slategrey") 
-                k+=1
+                if k < d:
+                    axes[i, j].set_title(f"$X_{k+1}$ for $t=1,...,{T}$")
+                    axes[i, j].set_xlabel(f"$T$")
+                    axes[i, j].set_ylabel(f"$X_{k+1}$")
+                    axes[i, j].plot(idxs, obs_data[:, k], alpha=0.85,
+                                    color="slategrey")
+                k += 1
 
         if dir:
             plt.savefig(dir)
         else:
             plt.show()
-
-if __name__ == "__main__":
-    f = lambda x : x
-    g = lambda x : (1-4*np.e**(-x**2/2))*x
-    h = lambda x : (1-4*x**3 * np.e**(-x**2/2))*x
-
-    links = {
-                0 : [((0, -1), 0.7), ((1, 0), -0.8)],
-                1 : [((1, -1), 0.8), ((3, 0), 0.8)],
-                2 : [((2, -1), 0.5), ((1, -2), 0.5), ((3, 0), 0.6)],
-                3 : [((3, -1), 0.4)],
-            }
-
-    dscm = DSCM(links=links, map = g)
-    obs_data = dscm.generate_obs_data(T=1000)
-    # dscm.plot_data(obs_data, dim=(2,2))
-    adjacency_matrices = dscm.get_adjacency_matrices()
-    summary_graph = dscm.get_summary_graph()
-    print(summary_graph)

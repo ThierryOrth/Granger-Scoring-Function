@@ -1,8 +1,30 @@
 import numpy as np
 import causaldag as cd
-from sklearn.metrics import accuracy_score, precision_score, recall_score
 
-# Overview article of evaluation methods in causal discovery: https://arxiv.org/pdf/2202.02896.pdf.
+def get_summary_graph(amats : np.array = None, dag_repr : bool = True) -> np.array:
+    """ Constructs summary graph from adjacency matrices, defined as summary_graph[i,j] = 1 iff
+        amats[i,j,tau] = 1 for some tau. 
+
+            :param amats: 
+                adjacency matrices representing contemporaneous and lagged causes of DSCM
+            :param dag_repr:
+                Boolean to convert summary graph into DAG representation
+            
+            :returns summary_graph:
+                summary graph induced by adjacency matrices
+    """
+
+    *_ , d = amats.shape
+    summary_graph = np.zeros((d,d)).astype(int)
+
+    for i in range(d):
+        for j in range(d):
+            summary_graph[i,j] = 1 if 0 < np.sum(amats[:, i, j]) else 0
+
+    if dag_repr:
+        np.fill_diagonal(summary_graph, 0)
+
+    return summary_graph
 
 def cpdag_from_dag(dag_repr: np.array) -> tuple:
     """ Constructs CPDAG representing the MEC of the input DAG.
@@ -12,20 +34,21 @@ def cpdag_from_dag(dag_repr: np.array) -> tuple:
 
             :returns cpdag: 
                 PDAG object representation of CPDAG
-            :returns adj_matrix: 
+            :returns amat: 
                 adjacency matrix representation of CPDAG
-            :returns node_list: 
-                list of nodes of CPDAG
+            :returns vstructs: 
+                list of v-structures in CPDAG
 
         """
 
-    dag = cd.DAG.from_amat(dag_repr) \
+    dag = cd.DAG.from_amat(amat = dag_repr) \
         if isinstance(dag_repr, np.ndarray) else dag_repr
 
     cpdag = dag.cpdag()
-    adj_matrix, _ = cpdag.to_amat()
+    amat, _ = cpdag.to_amat()
+    vstructs = cpdag.vstructs()
 
-    return cpdag, adj_matrix
+    return cpdag, amat, vstructs
 
 def equivalence_class_from_cpdag(cpdag_repr: np.array) -> tuple:
     """ Construct the MEC as represented by the input CPDAG. 
@@ -35,23 +58,24 @@ def equivalence_class_from_cpdag(cpdag_repr: np.array) -> tuple:
         
         :returns equivalence class:
             PDAG object representation of MEC
-        :returns adj_matrices:
+        :returns amats:
             matrix representation of MEC
+        :returns vstructs: 
+            list of v-structures in MEC
 
     """
 
-    cpdag = cd.PDAG.from_amat(cpdag_repr) \
-        if isinstance(cpdag_repr, np.ndarray) \
-        else cpdag_repr
+    cpdag = cd.PDAG.from_amat(amat = cpdag_repr) \
+        if isinstance(cpdag_repr, np.ndarray) else cpdag_repr
 
     vertices = cpdag.nodes
+    vstructs = cpdag.vstructs()
     markov_equivalence_class = cpdag.all_dags()
 
-    adj_matrices = np.array([cd.DAG(vertices, dag).to_amat()[0]
+    amats = np.array([cd.DAG(vertices, dag).to_amat()[0]
                             for dag in markov_equivalence_class])
 
-    return markov_equivalence_class, adj_matrices
-
+    return markov_equivalence_class, amats, vstructs
 
 def get_graph_index(graphs: np.array, graph: np.array) -> int:
     """ Finds index of input graph in collection of graphs.
@@ -89,95 +113,22 @@ def is_identical_graph(first_graph: np.array, second_graph: np.array) -> bool:
 
     return is_equal
 
-def is_cyclic(graph_repr: np.array):
+def is_cyclic(graph_repr: np.array) -> bool:
     """ Check cyclicity of graph by checking for non-zero entries 
         in the graph matrix diagonal.
 
             :param graph_repr: 
                 matrix representation of graph
 
-            :returns zero_diagonal: 
+            :returns is_cyclic: 
                 Boolean indicating if input graph is cyclic
     """
-    diagonal = np.diagonal(graph_repr)
-    diagonal_sum = np.sum(diagonal)
+    is_cyclic = False
 
-    # TODO: cyclicity could occur in other ways as well
+    try:
+        _ = cd.DAG.from_amat(amat = graph_repr)
+    except:
+        is_cyclic = True
 
-    # TODO: turn into DAG and then check if adj matrix is the same
+    return is_cyclic
 
-    return False if diagonal_sum == 0 else True
-
-def get_mse_scores(true_graph : np.array, optimal_graph : np.array) -> float:
-    """ Computes MSE between true and estimated graph.
-
-            :param true_graph:
-                matrix representation of true graph
-            :param optimal_graph:
-                matrix representation of optimal graph
-            
-            :returns mse:
-                mean squared error between graphs
-
-    """
-
-    T, T_hat = true_graph.flatten(), optimal_graph.flatten()
-    mse = 1/len(T)*np.sum([(t-t_hat)**2 for t, t_hat in zip(T, T_hat)])
-
-    return mse
-
-def get_structural_hamming_distance(true_graph: np.array, optimal_graph: np.array) -> int:
-    """ Computes Structural Hamming Distance (SHD) between input graphs.
-
-            :param true_graph: 
-                matrix representation of true graph
-            :param optimal_graph:
-                matrix representation of optimal graph
-
-            :returns shd: 
-                SHD distance between input graphs
-    """
-
-    shd = cd.DAG.from_amat(true_graph).shd(
-            cd.DAG.from_amat(optimal_graph)
-            )
-
-    return shd
-
-def get_accuracy_scores(true_graph : np.array, optimal_graph : np.array) -> float:
-    """ Computes accuracy score of estimated graph.
-    
-            :param true_graph:
-                matrix representation of true graph
-            :param optimal_graph:
-                matrix representation of optimal graph
-
-            :returns accuracy:
-                accuracy score of optimal graph
-    """
-
-    T, T_hat = true_graph.flatten(), optimal_graph.flatten()
-    
-    accuracy = accuracy_score(y_true = T, y_pred = T_hat)
-
-    return accuracy
-
-def get_precision_recall_scores(true_graph : np.array, optimal_graph : np.array) -> float:
-    """ Computes precision and recall scores of estimated graph.
-    
-            :param true_graph:
-                matrix representation of true graph
-            :param optimal_graph:
-                matrix representation of optimal graph
-
-            :returns precision:
-                precision score of optimal graph
-            :returns recall:
-                recall score of optimal graph
-    """
-    T, T_hat = true_graph.flatten(), optimal_graph.flatten()
-
-    precision = precision_score(y_true = T, y_pred = T_hat)
-    recall = recall_score(y_true = T, y_pred = T_hat)
-
-    return precision, recall

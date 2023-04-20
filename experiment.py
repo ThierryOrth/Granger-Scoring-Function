@@ -1,166 +1,162 @@
+import os
+import sys
 import numpy as np
 from dscm import DSCM
-from time import time
-from data_recs import record_time, save_results, get_results, save_config, get_config
-from indep_tests import Oracle, PartialCorrelation, GaussianProcessRegression
+from param_configs import get_params, get_random_config
+from metrics import get_all_scores
+from data_recs import save_results, get_config
+from indep_tests import Oracle
 from scoring_function import score_equivalence_class, get_optimal_graph_index
-from graph_reps import cpdag_from_dag, equivalence_class_from_cpdag, \
-    get_structural_hamming_distance, get_graph_index, \
-    is_identical_graph, is_cyclic, \
-    get_accuracy_scores, get_precision_recall_scores, get_mse_scores
+from graph_reps import cpdag_from_dag, equivalence_class_from_cpdag, is_cyclic, get_graph_index, get_summary_graph
 
 ### Runge's experimental description is found here: https://arxiv.org/pdf/2003.03685.pdf ###
 
-### test 1: performance differences with PCMCI+ ###
+def estimate_graph(obs_data: np.array, arcs: list, equivalence_class: np.array, oracle: Oracle,
+                   method: str = "pcmciplus") -> tuple:
+    """ Estimate graph from observational data.
 
-### test 2: effect of increasing number of variables in the model ###
+            :param obs_data:
+                matrix of observational data for time series
+            :param arcs:
+                list of arcs
 
-### test 3: effect of adding more lagged causes ###
-
-### test 4: effect of adding more contemporaneous causes ###
-
-### test 5: effect of varying sample size ###
-
-## test 6: effect of dependencies ###
-
-
-def run_experiment(obs_data: np.array, edges: list, equivalence_class: np.array, tau_max: int, oracle: Oracle,
-                   method: str, constraint_based: bool = False) -> np.array:
-
-    scores = score_equivalence_class(obs_data=obs_data, edges=edges, equivalence_class=equivalence_class,
-                                     tau_max=tau_max, oracle=oracle, method=method)
-    opt_idx, *_ = get_optimal_graph_index(scores=scores)
-
-    # TODO: test constraint-based method for comparing scores
-
-    if constraint_based:
-        pass
-
-    return opt_idx
-
-# @record_time
-
-
-def run_epoch(config: dict, f: callable, oracle: Oracle, T: np.array, method: str) -> dict:
     """
-            :param config:
-                configuration defining DSCM
-            :param f:
-                transformation applied to linear sum of causes
-            :param oracle:
-                conditional independence oracle
-            :param T:
-                sample size of time series
-            :param N:
-                number of repetitions of experiment
-            :param method:
-                method for computing p-values
 
-            :returns performance_scores:
-                ### ###
-        """
+    scores, pcmci_graph = score_equivalence_class(obs_data, arcs, equivalence_class, oracle, method=method)
+    phi_graph_idx, *_ = get_optimal_graph_index(scores=scores)
+    pcmci_graph_idx = get_graph_index(graphs=equivalence_class, graph=pcmci_graph)
 
-    n_of_idxs = len(T)
+    phi_graph = equivalence_class[phi_graph_idx]
 
-    score_names = ["shd_scores", "accuracy_scores", "precision_scores",
-                   "recall_scores", "mse_scores", "equality_scores"]
-
-    performance_scores = dict({"config": config}) | \
-                         dict({score_name: np.zeros(n_of_idxs) for score_name in score_names})
-    
-    dscm = DSCM(links=config, f=f)
-
-    if not dscm.check_stationarity():
-        print(f"Warning: cannot perform experiment on non-stationary DSCM!")
-        return dict()
-
-    adj_matrices = dscm.get_adjacency_matrices()
-    summary_graph = dscm.get_summary_graph(adj_matrices=adj_matrices)
-
-    if is_cyclic(graph_repr=summary_graph):
-        print(f"Warning: cannot perform experiment on cyclic graph!")
-        return dict()
-
-    _, cpdag_repr = cpdag_from_dag(dag_repr=summary_graph)
-    _, equivalence_class = equivalence_class_from_cpdag(cpdag_repr=cpdag_repr)
-
-    if n := len(equivalence_class) == 1:
-        print(f"Warning: cannot perform experiment on MEC of size {n}!")
-        return dict()
-
-    tau_max = len(adj_matrices) - 1
-    edges = list(zip(*np.where(cpdag_repr == 1)))
-    true_idx = get_graph_index(graphs=equivalence_class,
-                               graph=summary_graph)
-
-    for time_idx, t in enumerate(T):
-        obs_data = dscm.generate_obs_data(T=t)
-        opt_idx = run_experiment(obs_data=obs_data, edges=edges, equivalence_class=equivalence_class,
-                                    tau_max=tau_max, oracle=oracle, method=method)
-        opt_graph = equivalence_class[opt_idx]
-
-        performance_scores["shd_scores"][time_idx] = get_structural_hamming_distance(true_graph=summary_graph, optimal_graph=opt_graph)
-        performance_scores["mse_scores"][time_idx] = get_mse_scores(true_graph=summary_graph, optimal_graph=opt_graph)
-        performance_scores["accuracy_scores"][time_idx] = get_accuracy_scores(true_graph=summary_graph, optimal_graph=opt_graph)
-        performance_scores["precision_scores"][time_idx],  performance_scores["recall_scores"][time_idx] = get_precision_recall_scores(
-                                                                                    true_graph=summary_graph, optimal_graph=opt_graph)
-        performance_scores["equality_scores"][time_idx] = 1 if is_identical_graph(first_graph = summary_graph, second_graph=opt_graph) else 0
-
-    return performance_scores
+    return phi_graph, pcmci_graph #, phi_graph_idx, pcmci_graph_idx
 
 
-def test_configurations(configs: dict, f: callable, oracle: Oracle, T: int, N: int, method: str):
+def run_experiment(obs_data: np.array, arcs: list, true_graph: np.array, equivalence_class: np.array,
+                   oracle: Oracle, method: str = "pcmciplus") -> np.array:
+    """ Run experiment and retrieve scores.
 
-    for iteration in N:
-        # TODO: generate random configuration with fixed parameter settings
-        # TODO: get performance scores
-        # TODO: get averages, map parameter setting to averages
-        pass
+    """
 
-    ### configs: mapping from integers to dictionaries ###
+    phi_graph, pcmci_graph = estimate_graph(obs_data, arcs, equivalence_class, oracle, method=method)
 
-    ## TEST FOR DIFFERENT VALUES OF T ###
+    phi_scores = get_all_scores(true_graph, phi_graph, arcs)
+    pcmci_scores = get_all_scores(true_graph, pcmci_graph, arcs)
 
-    config_scores = np.zeros(len(configs))
+    return phi_scores, pcmci_scores, phi_graph, pcmci_graph
 
-    ### run epoch for every configuration ###
+def run_epoch(var_param_config: dict, coeff_params: np.array, tau_params: np.array, func: callable,
+              oracle: Oracle, t: int,  method: str = "pcmciplus", data_transform: callable = np.cbrt, num_of_exp: int = 100, verbose: bool = True) -> tuple:
+    """ Runs experiment on a single variable parameter configuration with random
+        coefficients for num_of_exp times.
 
-    ### save scores to file using config index ###
+    """
 
-    # for each configuraiton,
+    phi_scores_epoch = np.zeros((num_of_exp, 3))
+    pcmci_scores_epoch = np.zeros((num_of_exp, 3))
 
+    iteration = 0
+
+    while iteration < num_of_exp:
+        random_config = get_random_config(var_param_config=var_param_config,
+                                          coeff_params=coeff_params, tau_params=tau_params)
+        
+        dscm = DSCM(links = random_config, f = func)
+
+        if not dscm.check_stationarity(): continue
+
+        obs_data = dscm.generate_obs_data(t = t, data_transform = data_transform)
+
+        true_graph = get_summary_graph(amats=dscm.get_adjacency_matrices())
+
+        if is_cyclic(true_graph): continue
+
+        _, cpdag_repr, _ = cpdag_from_dag(true_graph)
+        arcs = list(zip(*np.where(cpdag_repr == 1)))
+        _, equivalence_class, _ = equivalence_class_from_cpdag(cpdag_repr=cpdag_repr)
+
+        if len(equivalence_class) == 1: continue
+
+        phi_scores_iter, pcmci_scores_iter, phi_graph, pcmci_graph = run_experiment(obs_data, arcs, true_graph, 
+                                                                                    equivalence_class, oracle,  method=method)
+        phi_scores_epoch[iteration, :] = phi_scores_iter
+        pcmci_scores_epoch[iteration, :] = pcmci_scores_iter
+
+        iteration += 1
+
+    return phi_scores_epoch, pcmci_scores_epoch, phi_graph, pcmci_graph, true_graph
+
+def test_configs(var_param_configs: list, coeff_params : np.array, tau_params : np.array, sample_params : np.array, func_params : list, 
+                 oracle_params : list, method: str = "pcmciplus", data_transform: callable = np.cbrt, verbose : bool = True, folder : str = "results") -> dict:
+    """
+            Evaluates all input configurations on varying sample sizes and dependencies.
+    """
+    num_configs = len(var_param_configs)
+
+    for iteration, var_param_config in enumerate(var_param_configs):
+        scores = dict()
+        n_of_var, n_of_instant, n_of_lagged = tuple(var_param_config.values())
+        filename = f"{n_of_var}-{n_of_instant}-{n_of_lagged}"
+
+        if verbose: print(f"Testing for configuration {filename}...")
+
+        if os.path.exists(f"{folder}\\{filename}.pickle"):
+            continue
+
+        for t in sample_params:
+            scores[t] = dict()
+
+            if verbose: print(f"\t Testing for sample size {t}...")
+
+            nonlinear_idx = np.random.choice(np.arange(0, len(func_params), 1))
+
+            linear_func, linear_oracle = func_params[0], oracle_params[0]
+            nonlinear_func, nonlinear_oracle = func_params[nonlinear_idx], oracle_params[nonlinear_idx]
+
+            if verbose: print(f"\t\t Testing linear dependencies...")
+
+            linear_phi_scores, linear_pcmci_scores, linear_phi_graph, linear_pcmci_graph, true_graph = run_epoch(var_param_config = var_param_config, 
+                                                                                                                            coeff_params=coeff_params, 
+                                                                                                                            tau_params = tau_params, 
+                                                                                                                            func = linear_func, 
+                                                                                                                            oracle = linear_oracle, 
+                                                                                                                            t=t, method = method) 
+            if verbose: print(f"\t\t Testing non-linear dependencies...")
+
+            nonlinear_phi_scores, nonlinear_pcmci_scores, nonlinear_phi_graph, nonlinear_pcmci_graph, _ = run_epoch(var_param_config = var_param_config, 
+                                                                                                                                coeff_params=coeff_params, 
+                                                                                                                                tau_params = tau_params, 
+                                                                                                                                func = nonlinear_func, 
+                                                                                                                                oracle = nonlinear_oracle, 
+                                                                                                                                t=t, method = method) 
+            scores[t]["true_graph"] = true_graph
+            scores[t]["linear"] = dict({"phi": linear_phi_scores, 
+                                        "pcmci" : linear_pcmci_scores,
+                                        "linear_phi_graph" : linear_phi_graph,
+                                        "linear_pcmci_graph" : linear_pcmci_graph})
+            scores[t]["nonlinear"] = dict({"phi": nonlinear_phi_scores, 
+                                        "pcmci" : nonlinear_pcmci_scores,
+                                        "nonlinear_phi_graph" : nonlinear_phi_graph,
+                                        "nonlinear_pcmci_graph" : nonlinear_pcmci_graph})
+        
+        if verbose: print(f"Passed experiment {iteration+1}/{num_configs}!")
+
+        save_results(results = scores, 
+                     filename = filename, 
+                     folder = folder)
 
 if __name__ == "__main__":
-    def f(x): return x
-    def g(x): return (1-4*np.e**(-x**2/2))*x
-    def h(x): return (1-4*x**3 * np.e**(-x**2/2))*x
+    var_params, coeff_params, tau_params, sample_params, func_params, oracle_params = get_params()
 
-    # links = {
-    #         0: [((0,-1), 0.5)],
-    #         1: [((1,-1), 0.4), ((0,0), 0.4), ((2,0), 0.5)],
-    #         2: [((2,-1), 0.8)]
-    # }
+    var_param_configs = []
+    config_names = os.listdir(f"{os.getcwd()}\\configs")
 
-    links = {
-        0: [((0, -1), 0.7)],
-        1: [((1, -1), 0.7), ((0, 0), -0.8)],
-        2: [((2, -1), 0.5), ((1, 0), 0.5)],
-        # 3: [((3, -1), 0.5), ((0, 0), 0.5)],
-        # 4: [((4, -1), 0.5), ((1, 0), 0.5)],
-        # 5: [((5, -1), 0.5), ((1, -1), 0.2)],
-        # 6: [((6, -1), 0.5), ((5, 0), 0.5), ((1, -1), 0.2)],
-        # 7: [((7, -1), 0.5), ((5, 0), 0.5), ((1, -1), 0.2)],
-        # 8: [((8, -1), 0.5), ((1, -1), 0.2)],
-        # 9: [((4, -1), 0.5), ((7, -1), 0.2)],
-        # 10: [((4, -1), 0.5), ((9, 0), 0.5)],
-        # 11: [((4, -1), 0.5), ((8, 0), 0.5)],
-    }
+    for config_name in config_names:
+        if config_name.endswith("0-0"): continue
+        if config_name[0] not in ["6", "7", "8", "9"]: continue 
 
-    oracle = PartialCorrelation()
+        var_param_config = get_config(config_name)
+        var_param_configs.append(var_param_config)
+            
+    test_configs(var_param_configs, coeff_params, tau_params, 
+                 sample_params, func_params, oracle_params, folder = "results")
 
-    performance_scores = run_epoch(config=links, f=f, oracle=oracle,
-                                   T=np.arange(10, 151, 10), N=100, method="pcmciplus")
-    print(performance_scores)
-
-    # t = run_experiment(T = 100, links = links, map = f, oracle = pc, \
-    #                    N = 100, score_precision = 10, instant_effects = False, lag_specific = False)

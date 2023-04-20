@@ -1,3 +1,4 @@
+import os
 import scipy
 import numpy as np
 from tigramite.independence_tests.parcorr import ParCorr as pc
