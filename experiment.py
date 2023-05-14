@@ -1,162 +1,168 @@
-import os
-import sys
+import os, dscm, configs, metrics, random,data_recs, indep_tests, scoring_function, graph_reps
 import numpy as np
-from dscm import DSCM
-from param_configs import get_params, get_random_config
-from metrics import get_all_scores
-from data_recs import save_results, get_config
-from indep_tests import Oracle
-from scoring_function import score_equivalence_class, get_optimal_graph_index
-from graph_reps import cpdag_from_dag, equivalence_class_from_cpdag, is_cyclic, get_graph_index, get_summary_graph
 
-### Runge's experimental description is found here: https://arxiv.org/pdf/2003.03685.pdf ###
+def get_scores(true_graph : np.ndarray, phi_graph : np.ndarray, pcmci_graph : np.ndarray, cpdag_repr : np.ndarray, edges : list, true_graph_equiv : bool = True) -> tuple:
+    optimal_scores = [None]*4
+    
+    gsf_scores = metrics.get_all_scores(true_graph, phi_graph, edges)
+    pcmci_scores = metrics.get_all_scores(true_graph, pcmci_graph, edges)
 
-def estimate_graph(obs_data: np.array, arcs: list, equivalence_class: np.array, oracle: Oracle,
-                   method: str = "pcmciplus") -> tuple:
-    """ Estimate graph from observational data.
+    if not true_graph_equiv:
+        _, equiv_class = graph_reps.equivalence_class_from_cpdag(cpdag_repr = pcmci_graph)
+        scores = [metrics.get_all_scores(true_graph, graph, edges)[2] for graph in equiv_class]
+        optimal_scores = metrics.get_all_scores(true_graph, equiv_class[np.argmax(scores)], edges)
 
-            :param obs_data:
-                matrix of observational data for time series
-            :param arcs:
-                list of arcs
+    return gsf_scores, pcmci_scores, optimal_scores
 
-    """
-
-    scores, pcmci_graph = score_equivalence_class(obs_data, arcs, equivalence_class, oracle, method=method)
-    phi_graph_idx, *_ = get_optimal_graph_index(scores=scores)
-    pcmci_graph_idx = get_graph_index(graphs=equivalence_class, graph=pcmci_graph)
-
-    phi_graph = equivalence_class[phi_graph_idx]
-
-    return phi_graph, pcmci_graph #, phi_graph_idx, pcmci_graph_idx
-
-
-def run_experiment(obs_data: np.array, arcs: list, true_graph: np.array, equivalence_class: np.array,
-                   oracle: Oracle, method: str = "pcmciplus") -> np.array:
+def run_experiment(obs_data: np.ndarray, true_graph: np.ndarray, true_cpdag: np.ndarray,
+                   oracle: indep_tests.Oracle, method: str = "pcmciplus", true_graph_equiv: bool = True) -> np.ndarray:
     """ Run experiment and retrieve scores.
 
     """
 
-    phi_graph, pcmci_graph = estimate_graph(obs_data, arcs, equivalence_class, oracle, method=method)
+    p_matrices, pcmci_graph = scoring_function.run_pcmci(obs_data = obs_data, oracle = oracle, method = method)
 
-    phi_scores = get_all_scores(true_graph, phi_graph, arcs)
-    pcmci_scores = get_all_scores(true_graph, pcmci_graph, arcs)
+    cpdag_repr = true_cpdag if true_graph_equiv else pcmci_graph
 
-    return phi_scores, pcmci_scores, phi_graph, pcmci_graph
+    _, equiv_class = graph_reps.equivalence_class_from_cpdag(cpdag_repr = cpdag_repr)
+    arcs = list(zip(*np.where(cpdag_repr == 1))) 
 
-def run_epoch(var_param_config: dict, coeff_params: np.array, tau_params: np.array, func: callable,
-              oracle: Oracle, t: int,  method: str = "pcmciplus", data_transform: callable = np.cbrt, num_of_exp: int = 100, verbose: bool = True) -> tuple:
-    """ Runs experiment on a single variable parameter configuration with random
-        coefficients for num_of_exp times.
+    phi_graph = scoring_function.estimate_graph(equiv_class = equiv_class, arcs = arcs,
+                                                p_matrices = p_matrices, oracle = oracle, 
+                                                true_graph_equiv = true_graph_equiv)
+    
+    adjacencies = list(zip(*np.where(cpdag_repr == 1)))
+    edges = [(i,j) for (i,j) in adjacencies if (j,i) in adjacencies]
+    arcs = [(i,j) for (i,j) in adjacencies if (j,i) not in adjacencies]
+    equiv_class_size = len(equiv_class)
+    n_of_edges = len(edges)
+    n_of_arcs = len(arcs)
+    
+    gsf_scores, pcmci_scores, optimal_scores = get_scores(true_graph = true_graph, phi_graph = phi_graph, pcmci_graph = pcmci_graph,
+                                                                        cpdag_repr = cpdag_repr, edges = edges, true_graph_equiv = true_graph_equiv)
+            
+
+    return gsf_scores, pcmci_scores, optimal_scores, equiv_class_size, n_of_edges, n_of_arcs
+
+def generate_models(d : int, coeff_params : np.ndarray, tau_params : np.ndarray, f_params : list, oracle_params : list) -> tuple:
+    config = configs.get_random_config(d = d, coeff_params = coeff_params, 
+                                                tau_params = tau_params)
+    linear_idx = 0
+    nonlinear_idx = np.random.choice(np.arange(0, len(f_params), 1))
+
+    models = [dscm.DSCM(links = config, f = f_params[linear_idx]), 
+              dscm.DSCM(links = config, f = f_params[nonlinear_idx])]
+    oracles = [oracle_params[linear_idx], oracle_params[nonlinear_idx]]
+
+    true_graph = graph_reps.get_summary_graph(amats = models[0].get_adjacency_matrices())
+
+    return config, models, oracles, true_graph
+
+def is_valid_model(models : list, true_graph_equiv : bool = True) -> bool:
+    for model in models:
+        if not model.is_stationary_process():
+            return False
+
+        true_graph = graph_reps.get_summary_graph(amats = model.get_adjacency_matrices())
+
+        if graph_reps.is_cyclic(true_graph):
+                return False
+        
+        _, cpdag_repr, _ = graph_reps.cpdag_from_dag(true_graph)
+        _, equiv_class = graph_reps.equivalence_class_from_cpdag(cpdag_repr)
+
+        if len(equiv_class) == 1 and true_graph_equiv: 
+            return False
+    
+    return True
+
+def run_epoch(d : int, coeff_params: np.ndarray, tau_params: np.ndarray, sample_params : np.ndarray, f_params : list, 
+              oracle_params: list, experiment : str, method: str = "pcmciplus", data_transform: callable = np.cbrt, n_of_iter : int = 100, 
+              verbose: bool = True, true_graph_equiv: bool = True, seed : int = 42) -> tuple:
+    """ Runs experiment on a random configuration [...]
 
     """
-
-    phi_scores_epoch = np.zeros((num_of_exp, 3))
-    pcmci_scores_epoch = np.zeros((num_of_exp, 3))
-
+    
     iteration = 0
 
-    while iteration < num_of_exp:
-        random_config = get_random_config(var_param_config=var_param_config,
-                                          coeff_params=coeff_params, tau_params=tau_params)
+    results_folder = f"results_{experiment}"
+
+    if not os.path.exists(results_folder):
+         os.makedirs(results_folder)
+
+    random.seed(seed)
+
+    while iteration < n_of_iter:
+        savepath = f"{results_folder}\\{d}-{iteration}.pickle"
+
+        if os.path.exists(savepath):
+             iteration+=1
+             continue
         
-        dscm = DSCM(links = random_config, f = func)
+        results = dict({method: np.zeros((len(sample_params), 4)) for method in range(0,5)})
 
-        if not dscm.check_stationarity(): continue
-
-        obs_data = dscm.generate_obs_data(t = t, data_transform = data_transform)
-
-        true_graph = get_summary_graph(amats=dscm.get_adjacency_matrices())
-
-        if is_cyclic(true_graph): continue
-
-        _, cpdag_repr, _ = cpdag_from_dag(true_graph)
-        arcs = list(zip(*np.where(cpdag_repr == 1)))
-        _, equivalence_class, _ = equivalence_class_from_cpdag(cpdag_repr=cpdag_repr)
-
-        if len(equivalence_class) == 1: continue
-
-        phi_scores_iter, pcmci_scores_iter, phi_graph, pcmci_graph = run_experiment(obs_data, arcs, true_graph, 
-                                                                                    equivalence_class, oracle,  method=method)
-        phi_scores_epoch[iteration, :] = phi_scores_iter
-        pcmci_scores_epoch[iteration, :] = pcmci_scores_iter
-
-        iteration += 1
-
-    return phi_scores_epoch, pcmci_scores_epoch, phi_graph, pcmci_graph, true_graph
-
-def test_configs(var_param_configs: list, coeff_params : np.array, tau_params : np.array, sample_params : np.array, func_params : list, 
-                 oracle_params : list, method: str = "pcmciplus", data_transform: callable = np.cbrt, verbose : bool = True, folder : str = "results") -> dict:
-    """
-            Evaluates all input configurations on varying sample sizes and dependencies.
-    """
-    num_configs = len(var_param_configs)
-
-    for iteration, var_param_config in enumerate(var_param_configs):
-        scores = dict()
-        n_of_var, n_of_instant, n_of_lagged = tuple(var_param_config.values())
-        filename = f"{n_of_var}-{n_of_instant}-{n_of_lagged}"
-
-        if verbose: print(f"Testing for configuration {filename}...")
-
-        if os.path.exists(f"{folder}\\{filename}.pickle"):
-            continue
-
-        for t in sample_params:
-            scores[t] = dict()
-
-            if verbose: print(f"\t Testing for sample size {t}...")
-
-            nonlinear_idx = np.random.choice(np.arange(0, len(func_params), 1))
-
-            linear_func, linear_oracle = func_params[0], oracle_params[0]
-            nonlinear_func, nonlinear_oracle = func_params[nonlinear_idx], oracle_params[nonlinear_idx]
-
-            if verbose: print(f"\t\t Testing linear dependencies...")
-
-            linear_phi_scores, linear_pcmci_scores, linear_phi_graph, linear_pcmci_graph, true_graph = run_epoch(var_param_config = var_param_config, 
-                                                                                                                            coeff_params=coeff_params, 
-                                                                                                                            tau_params = tau_params, 
-                                                                                                                            func = linear_func, 
-                                                                                                                            oracle = linear_oracle, 
-                                                                                                                            t=t, method = method) 
-            if verbose: print(f"\t\t Testing non-linear dependencies...")
-
-            nonlinear_phi_scores, nonlinear_pcmci_scores, nonlinear_phi_graph, nonlinear_pcmci_graph, _ = run_epoch(var_param_config = var_param_config, 
-                                                                                                                                coeff_params=coeff_params, 
-                                                                                                                                tau_params = tau_params, 
-                                                                                                                                func = nonlinear_func, 
-                                                                                                                                oracle = nonlinear_oracle, 
-                                                                                                                                t=t, method = method) 
-            scores[t]["true_graph"] = true_graph
-            scores[t]["linear"] = dict({"phi": linear_phi_scores, 
-                                        "pcmci" : linear_pcmci_scores,
-                                        "linear_phi_graph" : linear_phi_graph,
-                                        "linear_pcmci_graph" : linear_pcmci_graph})
-            scores[t]["nonlinear"] = dict({"phi": nonlinear_phi_scores, 
-                                        "pcmci" : nonlinear_pcmci_scores,
-                                        "nonlinear_phi_graph" : nonlinear_phi_graph,
-                                        "nonlinear_pcmci_graph" : nonlinear_pcmci_graph})
+        if verbose: print(f"Started experiment {iteration+1}/{n_of_iter} for d={d}...")
+                    
+        config, models, oracles, true_graph = generate_models(d = d, coeff_params = coeff_params, 
+                                                  tau_params = tau_params, f_params = f_params, oracle_params = oracle_params)
         
-        if verbose: print(f"Passed experiment {iteration+1}/{num_configs}!")
+        if not is_valid_model(models): continue
+      
+        _, true_cpdag, _ = graph_reps.cpdag_from_dag(dag_repr = true_graph)
+        data_recs.save_config(config = config, filename = f"{d}-{iteration}.pickle", 
+                                                    folder = f"configs_{experiment}")
 
-        save_results(results = scores, 
-                     filename = filename, 
-                     folder = folder)
+        for t_idx, t in enumerate(sample_params):
+            if verbose: print(f"\t Evaluating sample size t = {t}...")
+
+            for result_idx, (model, oracle) in enumerate(zip(models, oracles)):
+                obs_data = model.generate_obs_data(t = t , data_transform = data_transform)
+                dependencies = "linear" if result_idx==1 else "nonlinear"
+                if verbose: print(f"\t\t Evaluating {dependencies} dependencies...")
+                
+                gsf_scores, pcmci_scores, optimal_scores, n_of_members, n_of_edges, n_of_arcs = run_experiment(obs_data = obs_data, true_graph = true_graph, 
+                                                                                                true_cpdag = true_cpdag, oracle = oracle, method = method, 
+                                                                                                                    true_graph_equiv = true_graph_equiv)
+                
+                results[(result_idx*2)][t_idx, :] = gsf_scores
+                results[(result_idx*2) + 1][t_idx, :] = pcmci_scores
+                results[4][t_idx, :] = optimal_scores
+
+            results.update({5: n_of_members, 6 : n_of_edges, 7 : n_of_arcs})
+
+ 
+        data_recs.save_results(results = results, 
+                               savepath = savepath)
+
+        iteration+=1
+        
+        if verbose: print(f"Successfully passed {iteration+1}'th iteration for d={d}!")
+
+    if verbose: print(f"Successfully passed epoch of {n_of_iter} iterations for d={d}!")
+
+def test_configs(var_params: list, coeff_params: np.array, tau_params: np.array, sample_params: np.array,
+                 f_params: list, oracle_params: list, experiment: str, method: str = "pcmciplus", data_transform: callable = np.cbrt,
+                 verbose: bool = True, n_of_iter : int = 100, true_graph_equiv: bool = True, seed : int = 42) -> dict:
+    """ Evaluates all input configurations on varying sample sizes and dependencies.
+
+    """
+
+    for d in var_params:
+        run_epoch(d = d, coeff_params = coeff_params, tau_params = tau_params, sample_params = sample_params, f_params = f_params, 
+                  oracle_params = oracle_params, method = method, data_transform = data_transform, n_of_iter = n_of_iter, verbose = verbose, 
+                  true_graph_equiv = true_graph_equiv, seed = seed, experiment = experiment)
+
 
 if __name__ == "__main__":
-    var_params, coeff_params, tau_params, sample_params, func_params, oracle_params = get_params()
+    var_params, coeff_params, tau_params, sample_params, f_params, oracle_params = configs.get_params()
 
-    var_param_configs = []
-    config_names = os.listdir(f"{os.getcwd()}\\configs")
+    test_configs(var_params, coeff_params, tau_params, sample_params, 
+                 f_params, oracle_params, experiment = "with_access", true_graph_equiv=True, n_of_iter = 100)
+    test_configs(var_params, coeff_params, tau_params, sample_params, 
+                 f_params, oracle_params, experiment = "without_access", true_graph_equiv=False, n_of_iter = 100)
 
-    for config_name in config_names:
-        if config_name.endswith("0-0"): continue
-        if config_name[0] not in ["6", "7", "8", "9"]: continue 
 
-        var_param_config = get_config(config_name)
-        var_param_configs.append(var_param_config)
-            
-    test_configs(var_param_configs, coeff_params, tau_params, 
-                 sample_params, func_params, oracle_params, folder = "results")
+
+
+
 

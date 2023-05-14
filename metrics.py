@@ -1,5 +1,4 @@
-import copy
-import cdt
+import copy, cdt
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, mean_squared_error
 
@@ -28,25 +27,33 @@ def get_metrics(true_graph : np.array, est_graph : np.array) -> tuple:
 
     return accuracy, precision, recall, f1, mse
 
-def get_n_of_correct(true_graph : np.array, est_graph : np.array, edges : list) -> int:
+def get_prop_correct(true_graph : np.array, est_graph : np.array, edges : list) -> int:
     """ Computes number of correctly estimated edges. """
-    est_edges = copy.deepcopy(est_graph).astype(object)
 
-    est_edges[tuple(zip(*edges))] = [None] * len(edges)
+    n, *_ = true_graph.shape
 
-    correct_entries = np.where(est_edges == true_graph)
-    est_entries = np.where(est_edges != None)
+    true_abs_entries = true_graph.flatten()
+    est_abs_entries = est_graph.flatten()
 
-    return len(correct_entries)/len(est_entries)
+    abs_prop = np.sum(true_abs_entries == est_abs_entries)/len(est_abs_entries)
 
-def get_all_scores(true_graph : np.array, est_graph : np.array, edges : list = None) -> np.array:
+    mask = np.zeros((n,n))
+    mask[tuple(zip(*edges))] = True
+
+    true_rel_entries = true_graph[np.where(mask==True)]
+    est_rel_entries = est_graph[np.where(mask==True)]
+
+    rel_prop = np.sum(true_rel_entries==est_rel_entries)/len(est_rel_entries)
+
+    return abs_prop, rel_prop
+
+def get_all_scores(true_graph : np.array, est_graph : np.array, edges : list) -> np.array:
     """ Gathers all scores. """
 
     shd = get_structural_hamming_distance(true_graph, est_graph)
     frob_norm = get_frobenius_norm(true_graph, est_graph)
-    n_of_correct = get_n_of_correct(true_graph, est_graph, edges)
-    acc, prec, rec, f1, mse = get_metrics(true_graph, est_graph)
+    abs_prop, rel_prop = get_prop_correct(true_graph, est_graph, edges)
 
-    scores = [shd, frob_norm, n_of_correct]
+    scores = [shd, frob_norm, abs_prop, rel_prop]
                       
     return scores

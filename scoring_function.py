@@ -1,11 +1,9 @@
+import dscm, indep_tests, graph_reps
 import numpy as np
 from tigramite.pcmci import PCMCI
-from dscm import DSCM
 from tigramite import data_processing as pp
-from indep_tests import Oracle, PartialCorrelation
-from graph_reps import cpdag_from_dag, equivalence_class_from_cpdag, get_graph_index, get_summary_graph
 
-def run_pcmci(obs_data : np.array, oracle : Oracle, method : str = "pcmciplus", alpha_level : float = 0.05) -> tuple:
+def run_pcmci(obs_data : np.array, oracle : indep_tests.Oracle, method : str = "pcmciplus", pc_alpha : float = None, tau_max : int = 5) -> tuple:
     """ Runs PCMCI algorithm for retrieving p-value matrices and estimated graph.
 
             :param obs_data:
@@ -33,18 +31,20 @@ def run_pcmci(obs_data : np.array, oracle : Oracle, method : str = "pcmciplus", 
     pcmci = PCMCI(dataframe = pp.DataFrame(obs_data, var_names=[f"$X_{i}$" for i in range(d)]),
                                                         cond_ind_test = oracle, verbosity = 0)
     if method == "pcmci":
-        results = pcmci.run_pcmci()
+        results = pcmci.run_pcmci(pc_alpha = pc_alpha, tau_max = tau_max)
     elif method == "pcmciplus":
-        results = pcmci.run_pcmciplus()
+        results = pcmci.run_pcmciplus(pc_alpha = pc_alpha, tau_max = tau_max)
     else:
         raise ValueError("Warning: input method with name \"{method}\" not available!")
     
     p_matrices = np.transpose(a = results["p_matrix"], axes = axes)
     pcmci_window_graph = np.transpose(a = np.where(results["graph"]=="", 0, 1).astype(int), axes=axes)
 
-    return p_matrices, pcmci_window_graph
+    pcmci_summary_graph = graph_reps.get_summary_graph(pcmci_window_graph)
 
-def get_score_matrix(p_matrices : np.array, arcs : list, oracle: Oracle, method : str = "pcmciplus") -> np.array:
+    return p_matrices, pcmci_summary_graph
+
+def get_score_matrix(p_matrices : np.array, arcs : list, oracle: indep_tests.Oracle, pvalue_method : str = "harmonic") -> np.ndarray:
     """ Performs conditional independence tests on selected bivariates X^{t-tau}_i, X^t_j for each lag tau and 
         returns a scoring matrix composed of p-values for the hypothesis that X^{t-tau} causes X^t_j for some tau.
 
@@ -66,13 +66,12 @@ def get_score_matrix(p_matrices : np.array, arcs : list, oracle: Oracle, method 
 
     for (i,j) in arcs:
         p_matrix[i, j] = oracle.get_combined_pvalues(p_matrices[:, i, j], \
-                                                        method = "harmonic")
+                                                        method = pvalue_method)
     score_matrix = np.subtract(1, p_matrix)
 
     return score_matrix
 
-def score_equivalence_class(obs_data: np.array, arcs : list, oracle: Oracle, method : str, 
-                            equivalence_class : np.array = None, return_pcmci_graph : bool = True) -> np.array:
+def score_equivalence_class(equiv_class : np.ndarray, arcs : list, p_matrices : np.ndarray, oracle : indep_tests.Oracle, pvalue_method : str = "harmonic") -> np.ndarray:
     """ Scores each member of the input equivalence class using observational data and independence oracle.
 
             :param obs_data: 
@@ -92,27 +91,18 @@ def score_equivalence_class(obs_data: np.array, arcs : list, oracle: Oracle, met
 
     """
 
-    p_matrices, pcmci_window_graph = run_pcmci(obs_data = obs_data, oracle = oracle)
-
-    pcmci_summary_graph = get_summary_graph(pcmci_window_graph)
-
-    if not isinstance(equivalence_class, np.ndarray):
-        _, equivalence_class, _ = equivalence_class_from_cpdag(pcmci_summary_graph)
-
+    
     score_matrix = get_score_matrix(p_matrices = p_matrices, arcs = arcs, 
-                                        oracle = oracle, method = method)
+                                        oracle = oracle, pvalue_method = pvalue_method)
 
-    scores = np.zeros(len(equivalence_class))
+    scores = np.zeros(len(equiv_class))
 
-    for idx, member in enumerate(equivalence_class):
+    for idx, member in enumerate(equiv_class):
         scored_member = np.multiply(member, score_matrix)
         pvalues = scored_member[np.nonzero(scored_member)].flatten()
-        scores[idx] = oracle.get_combined_pvalues(pvalues = pvalues, method = "harmonic")
-
-    if not return_pcmci_graph:
-        return scores
+        scores[idx] = oracle.get_combined_pvalues(pvalues, method = "harmonic") if pvalues != [] else 0.0
     
-    return scores, pcmci_summary_graph
+    return scores
 
 def get_optimal_graph_index(scores: np.array) -> tuple:
     """ Obtain graph that optimises scoring function.
@@ -136,3 +126,23 @@ def get_optimal_graph_index(scores: np.array) -> tuple:
     ranking = np.argsort(scores)
     
     return opt_score_idx, ranking
+
+def estimate_graph(equiv_class: np.ndarray, arcs : list, p_matrices : np.ndarray, oracle: indep_tests.Oracle,
+                   method: str = "pcmciplus", true_graph_equiv: bool = True, get_highest : bool = False) -> tuple:
+    """ Estimate graph from observational data.
+
+            :param obs_data:
+                matrix of observational data for time series
+            :param arcs:
+                list of arcs
+    """
+
+    scores = score_equivalence_class(equiv_class  = equiv_class, arcs = arcs, 
+                                     p_matrices = p_matrices, oracle = oracle)
+
+    phi_graph_idx, *_ = get_optimal_graph_index(scores = scores)
+
+    phi_graph = equiv_class[phi_graph_idx]
+
+    return phi_graph
+

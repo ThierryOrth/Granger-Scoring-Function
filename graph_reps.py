@@ -69,13 +69,12 @@ def equivalence_class_from_cpdag(cpdag_repr: np.array) -> tuple:
         if isinstance(cpdag_repr, np.ndarray) else cpdag_repr
 
     vertices = cpdag.nodes
-    vstructs = cpdag.vstructs()
     markov_equivalence_class = cpdag.all_dags()
 
     amats = np.array([cd.DAG(vertices, dag).to_amat()[0]
                             for dag in markov_equivalence_class])
 
-    return markov_equivalence_class, amats, vstructs
+    return markov_equivalence_class, amats
 
 def get_graph_index(graphs: np.array, graph: np.array) -> int:
     """ Finds index of input graph in collection of graphs.
@@ -97,7 +96,6 @@ def get_graph_index(graphs: np.array, graph: np.array) -> int:
             return graph_idx
 
     return None
-
 
 def is_identical_graph(first_graph: np.array, second_graph: np.array) -> bool:
     """ Structural equality comparison of input graphs.

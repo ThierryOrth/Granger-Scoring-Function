@@ -104,7 +104,7 @@ class DSCM:
 
         return adj_matrices
 
-    def check_stationarity(self) -> bool:
+    def is_stationary_process(self) -> bool:
         """ Code and comments in this function are a slight adaption from code by Jakob Runge, source: 
                 https://github.com/jakobrunge/tigramite/blob/c877f0b578c357b1c26f666764be07676193d4dc/tigramite/toymodels/structural_causal_processes.py#L865
 

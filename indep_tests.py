@@ -1,8 +1,7 @@
-import os
-import scipy
+import os, scipy, tigramite
 import numpy as np
 from tigramite.independence_tests.parcorr import ParCorr as pc
-from tigramite.independence_tests.gpdc import GPDC as gp
+from tigramite.independence_tests.gpdc import GPDC as gpr
 
 class Oracle:
     """ Parent class for independence oracles. In all child classes, we test X _|_ Y | Z using
@@ -66,7 +65,7 @@ class PartialCorrelation(pc, Oracle):
 
         return p_value
 
-class GaussianProcessRegression(gp, Oracle):
+class GaussianProcessRegression(gpr, Oracle):
     """ Conditional independence oracle based on Gaussian Process Regression, which
         is a non-parametric method for estimating f_X and f_Y. """
 
